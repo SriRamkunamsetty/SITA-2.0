@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-multipart
+ultralytics
+supervision
+easyocr
+firebase-admin
+opencv-python-headless
+numpy
+onnxruntime
