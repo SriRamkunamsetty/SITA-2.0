@@ -2,7 +2,8 @@ FROM python:3.10-slim
 
 # Prepare system for OpenCV, EasyOCR, and create user
 RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
+    libgl1 \
+    libglx-mesa0 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
