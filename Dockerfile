@@ -1,31 +1,28 @@
 FROM python:3.10-slim
 
-WORKDIR /app
-
-# Install system dependencies
+# Prepare system for OpenCV, EasyOCR, and create user
 RUN apt-get update && apt-get install -y \
-    libgl1 \
+    libgl1-mesa-glx \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender-dev \
+    tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy backend requirements
-COPY huggingface_requirements.txt .
+RUN useradd -m -u 1000 user
+USER user
+ENV PATH="/home/user/.local/bin:${PATH}"
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r huggingface_requirements.txt
+WORKDIR /home/user/app
 
-# Copy source code
-COPY backend/ ./backend/
-COPY sita_core.py .
-COPY huggingface_app.py .
-# If you have custom weights, ensure they are copied or downloaded
-COPY yolov8n.pt .
+# Install Python requirements
+COPY --chown=user requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Expose Hugging Face default port
+# Copy all project files
+COPY --chown=user . .
+
+# Run the FastAPI server
 EXPOSE 7860
-
-# Run FastAPI via Uvicorn on 0.0.0.0:7860
 CMD ["uvicorn", "huggingface_app:app", "--host", "0.0.0.0", "--port", "7860"]

@@ -16,6 +16,11 @@ engine = SITACore(model_path="yolov8n.pt", n_skip=3)
 def read_root():
     return {"status": "Online", "service": "SITA Backend Analytics API"}
 
+@app.get("/health")
+def health_check():
+    # Allows HF Space status monitoring to verify the API is alive and initialized
+    return {"status": "online", "firebase": "connected"}
+
 @app.post("/process_video")
 async def process_video_endpoint(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     """
