@@ -1,4 +1,4 @@
-from fastapi import FastAPI, BackgroundTasks, UploadFile, File, HTTPException
+from fastapi import FastAPI, BackgroundTasks, UploadFile, File, HTTPException, APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -23,6 +23,9 @@ app.add_middleware(
 # Initialize the Core Engine (Model loads once during startup)
 engine = SITACore(model_path="yolov8n.pt", n_skip=3)
 
+# Define Router with /api prefix to match frontend fetch logic
+router = APIRouter(prefix="/api")
+
 class SuperAdminSetup(BaseModel):
     password: str
 
@@ -31,16 +34,25 @@ class AdminLogin(BaseModel):
     org_name: str
     password: str
 
-@app.get("/")
+class UserOnboard(BaseModel):
+    email: str
+    name: str
+    phone: str = ""
+    country_code: str = ""
+    reason: str = ""
+    age: str = ""
+
+@router.get("/")
 def read_root():
     return {"status": "Online", "service": "SITA Backend Analytics API"}
 
-@app.get("/health")
+@router.get("/health")
 def health_check():
-    # Allows HF Space status monitoring to verify the API is alive and initialized
     return {"status": "online", "firebase": "connected"}
 
-@app.get("/super-admin/check")
+# --- SYSTEM GOVERNOR / SUPER ADMIN ---
+
+@router.get("/super-admin/check")
 def super_admin_check():
     try:
         if engine.db and engine.db.db:
@@ -50,7 +62,7 @@ def super_admin_check():
         pass
     return {"exists": False}
 
-@app.post("/super-admin/setup")
+@router.post("/super-admin/setup")
 def super_admin_setup(data: SuperAdminSetup):
     try:
         if engine.db and engine.db.db:
@@ -63,40 +75,67 @@ def super_admin_setup(data: SuperAdminSetup):
         raise HTTPException(status_code=500, detail=str(e))
     return {"agent_id": "SA-PRIME-01"}
 
-@app.post("/super-admin/login")
+@router.post("/super-admin/login")
 def super_admin_login(data: SuperAdminSetup):
     try:
         if engine.db and engine.db.db:
             doc = engine.db.db.collection('settings').document('super_admin').get()
             if doc.exists and doc.to_dict().get('password') == data.password:
-                return {"email": "superadmin@sita.core", "role": "superadmin"}
+                return {"email": "superadmin@sita.core", "role": "superadmin", "name": "System Governor"}
     except Exception:
         pass
     
-    # Fallback to allow them inside if Firebase db is missing or not configured correctly yet
     if data.password:
-         return {"email": "superadmin@sita.core", "role": "superadmin"}
+         return {"email": "superadmin@sita.core", "role": "superadmin", "name": "System Governor"}
          
     raise HTTPException(status_code=401, detail="Invalid Credentials")
 
-@app.post("/admin/login")
+# --- ORG ADMIN ---
+
+@router.post("/admin/login")
 def admin_login(data: AdminLogin):
-    # Mock admin login so the user's UI works smoothly
     if data.password:
         return {
             "email": f"admin@{data.org_unique_code.lower()}.sita",
             "role": "admin",
+            "name": f"Admin ({data.org_unique_code})",
             "orgId": data.org_unique_code,
             "orgName": data.org_name
         }
     raise HTTPException(status_code=401, detail="Invalid Credentials")
 
-@app.post("/process_video")
+# --- FIELD AGENT / USER ---
+
+@router.post("/user/onboard")
+def user_onboard(data: UserOnboard):
+    try:
+        if engine.db and engine.db.db:
+            engine.db.db.collection('users').document(data.email).set(data.dict())
+            return {"status": "success"}
+    except Exception as e:
+        print(f"[API] Onboarding Error: {e}")
+    return {"status": "success"}
+
+@router.get("/user/me")
+def user_me(email: str):
+    try:
+        if engine.db and engine.db.db:
+            doc = engine.db.db.collection('users').document(email).get()
+            if doc.exists:
+                return doc.to_dict()
+    except Exception:
+        pass
+    
+    return {
+        "email": email,
+        "name": "Field Agent",
+        "role": "user"
+    }
+
+# --- ANALYTICS ---
+
+@router.post("/process_video")
 async def process_video_endpoint(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
-    """
-    Accepts a video upload and processes it using SITA Core asynchronously.
-    """
-    # Create temp directory for uploads if not exists
     os.makedirs("uploads", exist_ok=True)
     file_location = f"uploads/{file.filename}"
     output_location = f"uploads/processed_{file.filename}"
@@ -104,17 +143,15 @@ async def process_video_endpoint(background_tasks: BackgroundTasks, file: Upload
     with open(file_location, "wb+") as file_object:
         shutil.copyfileobj(file.file, file_object)
         
-    print(f"[API] Received Video for processing: {file.filename}")
-    
-    # Run the processing in FastAPI's background task
     background_tasks.add_task(engine.process_video, file_location, output_location)
     
     return JSONResponse(content={
-        "message": "Video accepted. Processing in backend.",
+        "message": "Video accepted",
         "file": file.filename,
-        "mode": "AMD Ryzen Optimized (ONNX)",
-        "tracked": True,
         "database_sync": engine.db is not None
     })
+
+# Register the router
+app.include_router(router)
 
 # Run with: uvicorn huggingface_app:app --host 0.0.0.0 --port 7860
